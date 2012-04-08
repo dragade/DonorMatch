@@ -1,0 +1,18 @@
+h2. DonorMAtch
+
+A simple scalali based script which uses the linkedin API and finds people
+based on location. Then it queries the HEP database and shows which people
+have companies that match donations.
+
+h2. To run
+
+You must have scala 2.9.1 installed.
+Go to http://www.scala-lang.org/downloads
+
+You probably also need Java6 installed, but it may already be on your machine.
+
+Then do:
+
+cd bin
+./donorMatch.scala
+
