@@ -12,6 +12,7 @@ exec scala -classpath $CP "$0" "$@"
 !#
 
 import io.Source
+import java.io.{FileWriter, File, PrintWriter}
 import java.util.{ArrayList, Scanner}
 import org.apache.http.client.entity.UrlEncodedFormEntity
 import org.apache.http.client.methods.HttpPost
@@ -25,16 +26,27 @@ import org.scribe.model.Response
 import com.dragade.scalali._
 import scala.xml.XML
 import scala.collection.mutable.HashMap
-import java.io.File
-import java.io.PrintWriter
+val PEOPLE_PER_PAGE = 25
 
-if (args.length < 3) {
-  println("USAGE: donorMatch <firstName> <lastName> <zipCode> [pageNum]")
-  println("  firstName, lastName, and zipCode are required")
-  println("  optionally you can pass a starting count. If there are more than 25 people with the given name")
-  println("  then a value of 1 would get people 26-50, etc.")
+if (args.length != 1) {
+  println("USAGE: donorMatch <inputFile>")
+  println("  inputFile is a file with each line containing text in the format:")
+  println("  firstName | lastName | zipCode")
+  println("  Optionally any row can be in the format:")
+  println("  firstName | lastName | zipCode | pageNumber")
+  println("  If pageNumber is left out, it's assumed to be 0, but if you know for a given name that there are")
+  println("  too many people with that name, you can specify a page number (assuming 25 people per page)")
   System.exit(0)
 }
+
+case class InputRow(firstName:String, lastName:String, zipCode:String, start: Int)
+
+val inputRows = Source.fromFile(args(0)).getLines.toList.map(s => {
+  val parts = s.split("\\|").map(_.trim)
+  val start = if (parts.size == 4) { parts(3).toInt * PEOPLE_PER_PAGE } else { 0 }
+  InputRow(parts(0), parts(1), parts(2), start)
+})
+println("There are %d names to search for".format(inputRows.size))
 
 val apiKey = "g7omu90wtvwh"
 val secretKey = "AfMTHKwRdq8CZLae"
@@ -65,63 +77,100 @@ else {
 }
 val oauthService = scalali.oauthService
 
-val PEOPLE_PER_PAGE = 25
-val firstName = args(0)
-val lastName = args(1)
-val zipCode = args(2)
-val start = if (args.size == 4) { args(3).toInt * PEOPLE_PER_PAGE } else { 0 }
+val sb = new StringBuilder
+sb.append(
+"""
+<html><head>
+<title>DonorMatch Report</title>
+</head><body>
+<table border="2" cellspacing="2" cellpadding="2">
+  <thead>
+    <tr><td>First Name</td><td>Last Name</td><td>Headline</td><td>Picture</td><td>Companies</td><td>Matching?</td></tr>
+  </thead>
+  <tbody>
+""")
 
-println("Looking for %s %s living in %s. start count %d".format(firstName,lastName,zipCode, start))
+inputRows.map(doOnePersonSearch).foreach(sb.append)
+sb.append("</tbody></table>\n</body></html>\n")
 
-//execute a people search for this person and output all the results. The max results is 25 unless we paginate
-val restUrl =
-  "http://api.linkedin.com/v1/people-search:" +
-  "(people:(id,first-name,last-name,headline,three-current-positions),num-results)" +
-  "?first-name=%s&last-name=%s&sort=distance&country-code=us&postal-code=%s&start=%d&count=%d"
-    .format(firstName,lastName,zipCode,start,PEOPLE_PER_PAGE)
+val outputFile = new File ("donorMatchReport.html")
+val fw = new FileWriter(outputFile)
+fw.write(sb.toString)
+fw.close
 
-val orequest: OAuthRequest = new OAuthRequest(Verb.GET, restUrl)
-oauthService.signRequest(new Token(accessToken.token,accessToken.secret), orequest)
-println("....making people search request to LinkedIn")
-val oresponse: Response = orequest.send();
-val body = oresponse.getBody();
-println("....parsing XML")
-val xml = XML.loadString(body)
-val people = parsePeopleXml(xml)
-println("....found %d total people with the name %s %s".format(people.size, firstName, lastName))
-val matchMap = findMatchingCompanies(people)
-def companyMatches(c : String) = matchMap.contains(c) && ! matchMap.get(c).get.isEmpty
+println("Done! See report at " + outputFile.getAbsolutePath)
 
-if (people.isEmpty) {
-  println("\nNo people search results for that name.")
-  System.exit(0)
+
+/**
+ * Does a search for one input row and returns an HTML report snippet
+ */
+def doOnePersonSearch(row:InputRow) : String = {
+  println("Looking for " + row)
+
+  val restUrl =
+    "http://api.linkedin.com/v1/people-search:" +
+    "(people:(id,first-name,last-name,picture-url,headline,three-current-positions),num-results)" +
+    "?first-name=%s&last-name=%s&sort=distance&country-code=us&postal-code=%s&start=%d&count=%d"
+      .format(row.firstName, row.lastName, row.zipCode, row.start, PEOPLE_PER_PAGE)
+
+  val orequest: OAuthRequest = new OAuthRequest(Verb.GET, restUrl)
+  oauthService.signRequest(new Token(accessToken.token,accessToken.secret), orequest)
+  println("....making people search request to LinkedIn")
+  val oresponse: Response = orequest.send();
+  val body = oresponse.getBody();
+  println("....loading XML")
+  val xml = XML.loadString(body)
+  println("....parsing XML for people")
+  val people = parsePeopleXml(xml)
+  println("....found %d total people with the name %s %s".format(people.size, row.firstName, row.lastName))
+  println("....querying HEP data")
+  val matchMap = findMatchingCompanies(people)
+  println("....got HEP results")
+
+  if (people.isEmpty) { """<tr><td>%s</td><td>%s</td><td colspan="4">No peoplesearch results!</td></tr>\n""".format(row.firstName,row.lastName) }
+  else { generateReportForPeople(people, matchMap) }
 }
 
-val (lucky, unlucky) = people.partition(!_.companies.filter(companyMatches).isEmpty)
+case class CompanyURL(company:String, url:String)
 
-if (! lucky.isEmpty){
-  println("\n\nThe following people have companies that match:")
-  lucky.foreach( p => {
-    val matchingCompanies = p.companies.filter(companyMatches)
-    val matchingUrls = matchingCompanies.map(matchMap.get(_).get.head) //one url for each company
-    println("%s %s\t\t\t%s\t\t%s\n".format(
-      p.firstName, p.lastName, matchingCompanies.mkString(", "), matchingUrls.mkString(", ")))
-  })
-  println("----------------")
-}
+/**
+ * Generates the HTML snippet for a given person's results
+ */
+def generateReportForPeople(people: Seq[Person], matchMap: HashMap[String,List[String]]) : String = {
+  def companyMatches(c : String) = matchMap.contains(c) && ! matchMap.get(c).get.isEmpty
+  val sb = new StringBuilder
+  val (lucky, unlucky) = people.partition(!_.companies.filter(companyMatches).isEmpty)
 
-if (! unlucky.isEmpty) {
-  println("\n\nThe following people have companies that DO NOT match:")
-  unlucky.foreach( p => {
-    val companies = if (p.companies.isEmpty) { "N/A" } else { p.companies.mkString(",") }
-    println("%s %s\t\t\t%s\n".format(p.firstName, p.lastName, companies))
-  })
+  if (! lucky.isEmpty){
+    lucky.foreach( p => {
+      val matchingCompanies = p.companies.filter(companyMatches)
+      val matchingUrls = matchingCompanies.map(c => CompanyURL(c, matchMap.get(c).get.head)) //a tuple of the company name and one url for it
+      val matchingUrlHrefs = matchingUrls.map(c => "<a href=\"%s\" target=\"_blank\">%s</a>".format(c.url, c.company))
+      val pic = if (p.picture.isDefined) { "<img src=\"%s\"/>".format(p.picture.get) } else { "" }
+
+      sb.append(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n"
+        .format(p.firstName, p.lastName, p.headline.getOrElse(""), pic , matchingCompanies.mkString(", "), matchingUrlHrefs.mkString(", ")))
+    })
+  }
+
+  if (! unlucky.isEmpty) {
+    unlucky.foreach( p => {
+      val companies = if (p.companies.isEmpty) { "N/A" } else { p.companies.mkString(",") }
+      val pic = if (p.picture.isDefined) { "<img src=\"%s\"/>".format(p.picture.get) } else { "" }
+      sb.append(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>--</td></tr>\n"
+        .format(p.firstName, p.lastName, p.headline.getOrElse(""), pic, companies))
+    })
+  }
+
+  sb.toString
 }
 
 /**
  * Holds the relevant person information
  */
-case class Person(val id:String, val firstName: String, val lastName: String, val headline: Option[String], val companies: Seq[String])
+case class Person(val id:String, val firstName: String, val lastName: String, val headline: Option[String], val companies: Seq[String], val picture: Option[String])
 
 /**
  * Parses the xml into a sequence of Person
@@ -134,7 +183,9 @@ def parsePeopleXml(xml: scala.xml.Elem) : Seq[Person] = {
     val lastName = (p \ "last-name").text
     val headline = maybe((p \ "headline").text)
     val companies =  (p \\ "name").map(_.text)
-    Person(id, firstName, lastName, headline, companies)
+    val picture = maybe((p \ "picture-url").text)
+
+    Person(id, firstName, lastName, headline, companies, picture)
   })
 }
 
