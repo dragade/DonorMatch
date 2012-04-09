@@ -1,8 +1,13 @@
-h2. DonorMAtch
+h2. DonorMatch
 
 A simple scalali based script which uses the linkedin API and finds people
 based on location. Then it queries the HEP database and shows which people
 have companies that match donations.
+
+It can be run on an input file with a simple format (run it and it'll tell you
+what format it expects)
+
+It will generate a simple report in HTML
 
 h2. To run
 
