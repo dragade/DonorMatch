@@ -39,42 +39,11 @@ if (args.length != 1) {
   System.exit(0)
 }
 
-case class InputRow(firstName:String, lastName:String, zipCode:String, start: Int)
-
-val inputRows = Source.fromFile(args(0)).getLines.toList.map(s => {
-  val parts = s.split("\\|").map(_.trim)
-  val start = if (parts.size == 4) { parts(3).toInt * PEOPLE_PER_PAGE } else { 0 }
-  InputRow(parts(0), parts(1), parts(2), start)
-})
+val inputFileName = args(0)
+val inputRows = readInputRows(inputFileName)
 println("There are %d names to search for".format(inputRows.size))
 
-val apiKey = "g7omu90wtvwh"
-val secretKey = "AfMTHKwRdq8CZLae"
-val scalali = new ScalaLi(apiKey, secretKey)
-
-val authCache = new File(".donorMatchAuthCache")
-val accessToken: AccessToken = if (!authCache.exists) {
-  val pw = new PrintWriter(authCache);
-  val (url, requestToken) = scalali.initialize()
-  println("Go hit URL\nhttps://www.linkedin.com/uas/oauth/authenticate?oauth_token=%s".format(requestToken.token))
-  print("Verifier: ")
-  val verifier = (new Scanner(System.in)).next
-  println("\nUsing verifier " + verifier)
-  val at : AccessToken = scalali.verify(requestToken,verifier)
-  println("Saving %s to .donorMatchAuthCache".format(at))
-  pw.println(at.token)
-  pw.println(at.secret)
-  pw.close
-  at
-}
-else {
-  val cache = Source.fromFile(authCache).getLines.toList
-  val accessTokenToken = cache(0)
-  val accessTokenSecret = cache(1)
-  val at : AccessToken = AccessToken(accessTokenToken, accessTokenSecret)
-  println("Re-using %s from .donorMatchAuthCache".format(at))
-  at
-}
+val (accessToken, scalali) = authenticate()
 val oauthService = scalali.oauthService
 
 val sb = new StringBuilder
@@ -90,16 +59,77 @@ sb.append(
   <tbody>
 """)
 
+//the main sections of the report
 inputRows.map(doOnePersonSearch).foreach(sb.append)
+
 sb.append("</tbody></table>\n</body></html>\n")
-
-val outputFile = new File ("donorMatchReport.html")
-val fw = new FileWriter(outputFile)
-fw.write(sb.toString)
-fw.close
-
+val outputFile = saveReport("donorMatchReport.html", sb.toString)
 println("Done! See report at " + outputFile.getAbsolutePath)
 
+/**
+ * Saves the report out to the filename and returns the File
+ */
+def saveReport(filename: String, reportContent :String) : File = {
+  val outputFile = new File (filename)
+  val fw = new FileWriter(outputFile)
+  fw.write(reportContent)
+  fw.close
+  outputFile
+}
+
+case class InputRow(firstName:String, lastName:String, zipCode:String, start: Int)
+
+/**
+ * Parses the input file into a list of InputRows
+ */
+def readInputRows(inputFile: String) : List[InputRow] = {
+  Source.fromFile(inputFile).getLines.toList.map(s => {
+    val parts = s.split("\\|").map(_.trim)
+    val start = if (parts.size == 4) { parts(3).toInt * PEOPLE_PER_PAGE } else { 0 }
+    InputRow(parts(0), parts(1), parts(2), start)
+  })
+}
+
+/**
+ * Decides whether to authenticate at LinkedIn or re-use credentials
+ */
+def authenticate() : (AccessToken, ScalaLi) = {
+  val authCache = new File(".donorMatchAuthCache")
+  val apiKey = "g7omu90wtvwh"
+  val secretKey = "AfMTHKwRdq8CZLae"
+  val scalali = new ScalaLi(apiKey, secretKey)
+  val accessToken = if (authCache.exists) reuseAuthCache(authCache) else authenticateToLinkedIn(authCache)
+  (accessToken, scalali)
+}
+/**
+ * Directs the user to authenticate at LinkedIn and then saves the accessToken to the authCache
+ */
+def authenticateToLinkedIn(authCache: File) : AccessToken = {
+  val pw = new PrintWriter(authCache);
+  val (url, requestToken) = scalali.initialize()
+  println("Go hit URL\n%s=%s".format(url,requestToken.token))
+  print("Verifier: ")
+  val verifier = (new Scanner(System.in)).next
+  println("\nUsing verifier " + verifier)
+  val at : AccessToken = scalali.verify(requestToken,verifier)
+  println("Saving %s to .donorMatchAuthCache".format(at))
+  pw.println(at.token)
+  pw.println(at.secret)
+  pw.close
+  at
+}
+
+/**
+ * Pulls the token and secret from the auth cache and re-uses it.
+ */
+def reuseAuthCache(authCache: File) : AccessToken = {
+  val cache = Source.fromFile(authCache).getLines.toList
+  val accessTokenToken = cache(0)
+  val accessTokenSecret = cache(1)
+  val at : AccessToken = AccessToken(accessTokenToken, accessTokenSecret)
+  println("Re-using %s from .donorMatchAuthCache".format(at))
+  at
+}
 
 /**
  * Does a search for one input row and returns an HTML report snippet
