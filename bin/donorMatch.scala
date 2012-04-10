@@ -98,16 +98,16 @@ def authenticate() : (AccessToken, ScalaLi) = {
   val apiKey = "g7omu90wtvwh"
   val secretKey = "AfMTHKwRdq8CZLae"
   val scalali = new ScalaLi(apiKey, secretKey)
-  val accessToken = if (authCache.exists) reuseAuthCache(authCache) else authenticateToLinkedIn(authCache)
+  val accessToken = if (authCache.exists) reuseAuthCache(authCache) else authenticateToLinkedIn(authCache, scalali)
   (accessToken, scalali)
 }
 /**
  * Directs the user to authenticate at LinkedIn and then saves the accessToken to the authCache
  */
-def authenticateToLinkedIn(authCache: File) : AccessToken = {
+def authenticateToLinkedIn(authCache: File, scalali: ScalaLi) : AccessToken = {
   val pw = new PrintWriter(authCache);
-  val (url, requestToken) = scalali.initialize()
-  println("Go hit URL\n%s=%s".format(url,requestToken.token))
+  val (_, requestToken) = scalali.initialize()
+  println("Go hit URL\nhttps://www.linkedin.com/uas/oauth/authenticate?oauth_token=%s".format(requestToken.token))
   print("Verifier: ")
   val verifier = (new Scanner(System.in)).next
   println("\nUsing verifier " + verifier)
