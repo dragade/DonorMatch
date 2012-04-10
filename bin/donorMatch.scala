@@ -113,22 +113,30 @@ def doOnePersonSearch(row:InputRow) : String = {
     "?first-name=%s&last-name=%s&sort=distance&country-code=us&postal-code=%s&start=%d&count=%d"
       .format(row.firstName, row.lastName, row.zipCode, row.start, PEOPLE_PER_PAGE)
 
-  val orequest: OAuthRequest = new OAuthRequest(Verb.GET, restUrl)
-  oauthService.signRequest(new Token(accessToken.token,accessToken.secret), orequest)
-  println("....making people search request to LinkedIn")
-  val oresponse: Response = orequest.send();
-  val body = oresponse.getBody();
-  println("....loading XML")
-  val xml = XML.loadString(body)
-  println("....parsing XML for people")
-  val people = parsePeopleXml(xml)
-  println("....found %d total people with the name %s %s".format(people.size, row.firstName, row.lastName))
-  println("....querying HEP data")
-  val matchMap = findMatchingCompanies(people)
-  println("....got HEP results")
+  try {
+      val orequest: OAuthRequest = new OAuthRequest(Verb.GET, restUrl)
+      oauthService.signRequest(new Token(accessToken.token,accessToken.secret), orequest)
+      println("....making people search request to LinkedIn")
+      val oresponse: Response = orequest.send();
+      val body = oresponse.getBody();
+      println("....loading XML")
+      val xml = XML.loadString(body)
+      println("....parsing XML for people")
+      val people = parsePeopleXml(xml)
+      println("....found %d total people with the name %s %s".format(people.size, row.firstName, row.lastName))
+      println("....querying HEP data")
+      val matchMap = findMatchingCompanies(people)
+      println("....got HEP results")
 
-  if (people.isEmpty) { """<tr><td>%s</td><td>%s</td><td colspan="4">No peoplesearch results!</td></tr>\n""".format(row.firstName,row.lastName) }
-  else { generateReportForPeople(people, matchMap) }
+      if (people.isEmpty) { """<tr><td>%s</td><td>%s</td><td colspan="4">No peoplesearch results!</td></tr>\n""".format(row.firstName,row.lastName) }
+      else { generateReportForPeople(people, matchMap) }
+  }
+  catch {
+    case e: Exception =>
+      println("Got exception for %s: %s".format(row, e.getMessage))
+      e.printStackTrace()
+      "" //just return an empty string to skip this person
+  }
 }
 
 case class CompanyURL(company:String, url:String)
