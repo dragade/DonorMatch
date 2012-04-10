@@ -107,6 +107,7 @@ def authenticate() : (AccessToken, ScalaLi) = {
 def authenticateToLinkedIn(authCache: File, scalali: ScalaLi) : AccessToken = {
   val pw = new PrintWriter(authCache);
   val (_, requestToken) = scalali.initialize()
+  //this is odd..the url returned by scalali (which is just what the scribe returns) is bad!
   println("Go hit URL\nhttps://www.linkedin.com/uas/oauth/authenticate?oauth_token=%s".format(requestToken.token))
   print("Verifier: ")
   val verifier = (new Scanner(System.in)).next
