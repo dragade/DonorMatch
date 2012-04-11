@@ -24,8 +24,9 @@ import org.scribe.model.OAuthRequest
 import org.scribe.model.Verb
 import org.scribe.model.Response
 import com.dragade.scalali._
-import scala.xml.XML
 import scala.collection.mutable.HashMap
+import xml.{Elem, XML}
+
 val PEOPLE_PER_PAGE = 25
 
 if (args.length != 1) {
@@ -72,7 +73,7 @@ println("Done! See report at " + outputFile.getAbsolutePath)
 /**
  * Saves the report out to the filename and returns the File
  */
-def saveReport(filename: String, reportContent :String) : File = {
+def saveReport(filename: String, reportContent: String) : File = {
   val outputFile = new File (filename)
   val fw = new FileWriter(outputFile)
   fw.write(reportContent)
@@ -80,7 +81,7 @@ def saveReport(filename: String, reportContent :String) : File = {
   outputFile
 }
 
-case class InputRow(firstName:String, lastName:String, zipCode:String, start: Int)
+case class InputRow(firstName: String, lastName: String, zipCode: String, start: Int)
 
 /**
  * Parses the input file into a list of InputRows
@@ -127,12 +128,22 @@ def authenticateToLinkedIn(authCache: File, scalali: ScalaLi) : AccessToken = {
  * Pulls the token and secret from the auth cache and re-uses it.
  */
 def reuseAuthCache(authCache: File) : AccessToken = {
-  val cache = Source.fromFile(authCache).getLines.toList
-  val accessTokenToken = cache(0)
-  val accessTokenSecret = cache(1)
+  val cache = Source.fromFile(authCache).getLines
+  val accessTokenToken = cache.next()
+  val accessTokenSecret = cache.next()
   val at : AccessToken = AccessToken(accessTokenToken, accessTokenSecret)
   println("Re-using %s from .donorMatchAuthCache".format(at))
   at
+}
+
+/**
+ * Formats a URL for a people search request for the input row's data
+ */
+def peopleSearchRestUrl(row: InputRow) = {
+  "http://api.linkedin.com/v1/people-search:" +
+    "(people:(id,first-name,last-name,picture-url,headline,three-current-positions),num-results)" +
+    "?first-name=%s&last-name=%s&sort=distance&country-code=us&postal-code=%s&start=%d&count=%d"
+      .format(row.firstName, row.lastName, row.zipCode, row.start, PEOPLE_PER_PAGE)
 }
 
 /**
@@ -140,21 +151,8 @@ def reuseAuthCache(authCache: File) : AccessToken = {
  */
 def doOnePersonSearch(row:InputRow) : String = {
   println("Looking for " + row)
-
-  val restUrl =
-    "http://api.linkedin.com/v1/people-search:" +
-    "(people:(id,first-name,last-name,picture-url,headline,three-current-positions),num-results)" +
-    "?first-name=%s&last-name=%s&sort=distance&country-code=us&postal-code=%s&start=%d&count=%d"
-      .format(row.firstName, row.lastName, row.zipCode, row.start, PEOPLE_PER_PAGE)
-
   try {
-      val orequest: OAuthRequest = new OAuthRequest(Verb.GET, restUrl)
-      oauthService.signRequest(new Token(accessToken.token,accessToken.secret), orequest)
-      println("....making people search request to LinkedIn")
-      val oresponse: Response = orequest.send();
-      val body = oresponse.getBody();
-      println("....loading XML")
-      val xml = XML.loadString(body)
+      val xml = makeAPIRequest(peopleSearchRestUrl(row))
       println("....parsing XML for people")
       val people = parsePeopleXml(xml)
       println("....found %d total people with the name %s %s".format(people.size, row.firstName, row.lastName))
@@ -173,6 +171,19 @@ def doOnePersonSearch(row:InputRow) : String = {
   }
 }
 
+/**
+ * Makes a signed API request and returns the body as XML
+ */
+def makeAPIRequest(restUrl: String) : Elem = {
+  val orequest = new OAuthRequest(Verb.GET, restUrl)
+  oauthService.signRequest(new Token(accessToken.token,accessToken.secret), orequest)
+  println("....making people search request to LinkedIn")
+  val oresponse: Response = orequest.send();
+  val body = oresponse.getBody();
+  println("....loading XML")
+  XML.loadString(body)
+}
+
 case class CompanyURL(company:String, url:String)
 
 /**
@@ -183,28 +194,24 @@ def generateReportForPeople(people: Seq[Person], matchMap: HashMap[String,List[S
   val sb = new StringBuilder
   val (lucky, unlucky) = people.partition(!_.companies.filter(companyMatches).isEmpty)
 
-  if (! lucky.isEmpty){
-    lucky.foreach( p => {
-      val matchingCompanies = p.companies.filter(companyMatches)
-      val matchingUrls = matchingCompanies.map(c => CompanyURL(c, matchMap.get(c).get.head)) //a tuple of the company name and one url for it
-      val matchingUrlHrefs = matchingUrls.map(c => "<a href=\"%s\" target=\"_blank\">%s</a>".format(c.url, c.company))
-      val pic = if (p.picture.isDefined) { "<img src=\"%s\"/>".format(p.picture.get) } else { "" }
+  lucky.foreach( p => {
+    val matchingCompanies = p.companies.filter(companyMatches)
+    val matchingUrls = matchingCompanies.map(c => CompanyURL(c, matchMap.get(c).get.head)) //a tuple of the company name and one url for it
+    val matchingUrlHrefs = matchingUrls.map(c => "<a href=\"%s\" target=\"_blank\">%s</a>".format(c.url, c.company))
+    val pic = if (p.picture.isDefined) { "<img src=\"%s\"/>".format(p.picture.get) } else { "" }
 
-      sb.append(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n"
-        .format(p.firstName, p.lastName, p.headline.getOrElse(""), pic , matchingCompanies.mkString(", "), matchingUrlHrefs.mkString(", ")))
-    })
-  }
+    sb.append(
+      "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n"
+      .format(p.firstName, p.lastName, p.headline.getOrElse(""), pic , matchingCompanies.mkString(", "), matchingUrlHrefs.mkString(", ")))
+  })
 
-  if (! unlucky.isEmpty) {
-    unlucky.foreach( p => {
-      val companies = if (p.companies.isEmpty) { "N/A" } else { p.companies.mkString(",") }
-      val pic = if (p.picture.isDefined) { "<img src=\"%s\"/>".format(p.picture.get) } else { "" }
-      sb.append(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>--</td></tr>\n"
-        .format(p.firstName, p.lastName, p.headline.getOrElse(""), pic, companies))
-    })
-  }
+  unlucky.foreach( p => {
+    val companies = if (p.companies.isEmpty) { "N/A" } else { p.companies.mkString(",") }
+    val pic = if (p.picture.isDefined) { "<img src=\"%s\"/>".format(p.picture.get) } else { "" }
+    sb.append(
+      "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>--</td></tr>\n"
+      .format(p.firstName, p.lastName, p.headline.getOrElse(""), pic, companies))
+  })
 
   sb.toString
 }
@@ -261,16 +268,22 @@ def queryMatch(companyName:String) : List[String] = {
   val USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_8) AppleWebKit/535.19 (KHTML, like Gecko) Chrome/18.0.1025.151 Safari/535.19"
   val MATCH_URL =  "http://www1.matchinggifts.com/redcross/companyprofile.cfm?"
   val client = new DefaultHttpClient()
-  val formparams = new ArrayList[NameValuePair]
-  formparams.add(new BasicNameValuePair("INPUT_ORGNAME", company))
-  formparams.add(new BasicNameValuePair("INPUT_ORGNAME_required", "You must input a company name"))
-  formparams.add(new BasicNameValuePair("eligible", "ALL"))
-  val entity = new UrlEncodedFormEntity(formparams, "UTF-8")
   val httppost = new HttpPost("http://www1.matchinggifts.com/redcross/giftdb.cfm")
-  httppost.setEntity(entity)
+  httppost.setEntity(buildForm(company))
   httppost.setHeader("User-Agent", USER_AGENT)
   val response = client.execute(httppost)
   val hrefs = Source.fromInputStream(response.getEntity.getContent, "UTF-8").getLines.filter(_.indexOf(MATCH_URL) > 0).toList
   val urls = hrefs.map(s => s.substring(s.indexOf("\"") + 1, s.lastIndexOf("\"")))
   urls
+}
+
+/**
+ * Builds the form based on what fields we know it expects for doing a query by company name
+ */
+def buildForm(company: String) : UrlEncodedFormEntity = {
+  val formparams = new ArrayList[NameValuePair]
+  formparams.add(new BasicNameValuePair("INPUT_ORGNAME", company))
+  formparams.add(new BasicNameValuePair("INPUT_ORGNAME_required", "You must input a company name"))
+  formparams.add(new BasicNameValuePair("eligible", "ALL"))
+  new UrlEncodedFormEntity(formparams, "UTF-8")
 }
