@@ -1,0 +1,30 @@
+table {
+	background-color: #f5f5f5;
+	padding: 5px;
+	border-radius: 5px;
+	-moz-border-radius: 5px;
+	-webkit-border-radius: 5px;
+	border: 1px solid #ebebeb;
+}
+table td, th {
+	padding: 1px 5px;
+}
+
+thead {
+	font: normal 15px Helvetica Neue,Helvetica,sans-serif;
+	text-shadow: 0 1px 0 white;
+	color: #999;
+}
+
+th {
+	text-align: left;
+	border-bottom: 1px solid #fff;
+}
+
+td {
+	font-size: 14px;
+}
+
+td:hover {
+	background-color: #fff;
+}
