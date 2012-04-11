@@ -11,9 +11,9 @@ table td, th {
 }
 
 thead {
-	font: normal 15px Helvetica Neue,Helvetica,sans-serif;
+	font: bold 18px Arial;
 	text-shadow: 0 1px 0 white;
-	color: #999;
+	color: black;
 }
 
 th {
@@ -25,6 +25,6 @@ td {
 	font-size: 14px;
 }
 
-td:hover {
+tr:hover {
 	background-color: #fff;
 }

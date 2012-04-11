@@ -49,10 +49,13 @@ val oauthService = scalali.oauthService
 val sb = new StringBuilder
 sb.append(
 """
-<html><head>
-<title>DonorMatch Report</title>
-</head><body>
-<table border="2" cellspacing="2" cellpadding="2">
+<html>
+<head>
+  <title>DonorMatch Report</title>
+  <link href="./donorMatch.css" type="text/css" rel="stylesheet" media="print,projection,screen" />
+</head>
+<body>
+<table>
   <thead>
     <tr><td>First Name</td><td>Last Name</td><td>Headline</td><td>Picture</td><td>Companies</td><td>Matching?</td></tr>
   </thead>
